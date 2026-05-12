@@ -1,0 +1,1 @@
+Olá Bob, este ficheiro foi enviado pela Alice sem cifra mas com HMAC.
