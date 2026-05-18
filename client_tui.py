@@ -569,6 +569,7 @@ class HelpScreen(Screen):
 # =========================================================================
 
 class MrSmithApp(App):
+    CSS_PATH = "client_tui.tcss"
     TITLE = "MR.SMITH"
     SUB_TITLE = "Plataforma de partilha segura"
 

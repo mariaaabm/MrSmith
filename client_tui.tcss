@@ -1,0 +1,240 @@
+/* MR.SMITH | Cyber-Noir theme
+   Inspirado no DESIGN.md (paleta navy/cyan/emerald) */
+
+Screen {
+    background: #0b1326;
+    color: #dae2fd;
+}
+
+Header {
+    background: #060e20;
+    color: #00f0ff;
+    text-style: bold;
+}
+
+Footer {
+    background: #060e20;
+    color: #849495;
+}
+
+/* ===== Cards / panels ===== */
+
+.card {
+    background: #131b2e;
+    border: solid #3b494b;
+    padding: 1 2;
+    margin: 1;
+}
+
+.card-title {
+    color: #00f0ff;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.label-caps {
+    color: #b9cacb;
+    text-style: bold;
+    margin-top: 1;
+}
+
+.subtle {
+    color: #849495;
+}
+
+/* ===== Login screen ===== */
+
+#login-container {
+    align: center middle;
+    height: 100%;
+}
+
+#login-card {
+    width: 64;
+    height: auto;
+    border: solid #3b494b;
+    background: #131b2e;
+    padding: 2 3;
+}
+
+.brand-title {
+    width: 100%;
+    text-align: center;
+    color: #00f0ff;
+    text-style: bold;
+    margin: 1;
+}
+
+.brand-sub {
+    width: 100%;
+    text-align: center;
+    color: #b9cacb;
+    margin-bottom: 2;
+}
+
+#actions {
+    height: auto;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+/* ===== Inputs ===== */
+
+Input {
+    background: #060e20;
+    color: #dae2fd;
+    border: solid #849495;
+    margin-bottom: 1;
+}
+
+Input:focus {
+    border: solid #00f0ff;
+}
+
+/* ===== Buttons ===== */
+
+Button {
+    background: #222a3d;
+    color: #dae2fd;
+    border: solid #00f0ff;
+    margin-right: 1;
+}
+
+Button:hover {
+    background: #2d3449;
+}
+
+Button.-primary {
+    background: #00f0ff;
+    color: #00363a;
+    text-style: bold;
+}
+
+Button.-success {
+    background: #4edea3;
+    color: #003824;
+    text-style: bold;
+}
+
+/* ===== Status text ===== */
+
+.status {
+    margin-top: 1;
+    height: auto;
+}
+
+.status-ok {
+    color: #4edea3;
+}
+
+.status-error {
+    color: #ffb4ab;
+}
+
+/* ===== Dashboard (3 colunas) ===== */
+
+#dashboard-layout {
+    height: 100%;
+}
+
+#left-sidebar {
+    width: 32;
+}
+
+#main-area {
+    width: 1fr;
+}
+
+#right-sidebar {
+    width: 40;
+}
+
+#online-list {
+    background: transparent;
+    height: auto;
+    max-height: 20;
+}
+
+ListItem {
+    background: transparent;
+    padding: 0 1;
+    color: #4edea3;
+}
+
+ListItem:hover {
+    background: #222a3d;
+}
+
+ListItem.--highlight {
+    background: #2d3449;
+}
+
+RadioSet {
+    background: transparent;
+    border: none;
+    margin-bottom: 1;
+}
+
+RadioButton {
+    background: transparent;
+    color: #dae2fd;
+}
+
+Select {
+    background: #060e20;
+    color: #dae2fd;
+    margin-bottom: 1;
+}
+
+/* ===== Inbox ===== */
+
+#inbox-container {
+    height: 100%;
+}
+
+DataTable {
+    background: #060e20;
+    color: #dae2fd;
+    margin-top: 1;
+    height: 1fr;
+}
+
+DataTable > .datatable--header {
+    background: #222a3d;
+    color: #00f0ff;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #00f0ff;
+    color: #00363a;
+}
+
+DataTable > .datatable--hover {
+    background: #222a3d;
+}
+
+/* ===== Help (sidebar + conteúdo) ===== */
+
+#help-layout {
+    height: 100%;
+}
+
+#help-sidebar {
+    width: 40;
+}
+
+#help-content {
+    width: 1fr;
+}
+
+#help-sidebar Button {
+    width: 100%;
+    margin-bottom: 1;
+    text-align: left;
+}
+
+#help-content-text {
+    padding: 1 2;
+    height: 1fr;
+}
