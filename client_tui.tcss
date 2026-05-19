@@ -1,5 +1,4 @@
-/* MR.SMITH | Cyber-Noir theme
-   Inspirado no DESIGN.md (paleta navy/cyan/emerald) */
+/* Tema Cyber-Noir */
 
 Screen {
     background: #0b1326;
@@ -17,7 +16,7 @@ Footer {
     color: #849495;
 }
 
-/* ===== Cards / panels ===== */
+/* ===== Cartões ===== */
 
 .card {
     background: #131b2e;
@@ -42,7 +41,7 @@ Footer {
     color: #849495;
 }
 
-/* ===== Login screen ===== */
+/* ===== Ecrã de login ===== */
 
 #login-container {
     align: center middle;
@@ -78,7 +77,7 @@ Footer {
     align-horizontal: right;
 }
 
-/* ===== Inputs ===== */
+/* ===== Campos de texto ===== */
 
 Input {
     background: #060e20;
@@ -91,7 +90,7 @@ Input:focus {
     border: solid #00f0ff;
 }
 
-/* ===== Buttons ===== */
+/* ===== Botões ===== */
 
 Button {
     background: #222a3d;
@@ -116,7 +115,7 @@ Button.-success {
     text-style: bold;
 }
 
-/* ===== Status text ===== */
+/* ===== Mensagens de estado ===== */
 
 .status {
     margin-top: 1;
@@ -186,7 +185,7 @@ Select {
     margin-bottom: 1;
 }
 
-/* ===== Inbox ===== */
+/* ===== Caixa de entrada ===== */
 
 #inbox-container {
     height: 100%;
@@ -214,7 +213,7 @@ DataTable > .datatable--hover {
     background: #222a3d;
 }
 
-/* ===== Help (sidebar + conteúdo) ===== */
+/* ===== Ajuda (barra lateral + conteúdo) ===== */
 
 #help-layout {
     height: 100%;
