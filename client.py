@@ -22,8 +22,8 @@ from crypto_utils import (
     SUPPORTED_CIPHERS,
 )
 
-# IP do servidor: pode ser passado como argumento (ex.: python3 client.py 192.168.1.50).
-# Default: localhost.
+# IP do servidor que pode ser passado como argumento (ex.: python3 client.py 192.168.1.50)
+# por defeito é o localhost
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
 PORT = 5000
 
@@ -31,16 +31,17 @@ INBOX_DIR = Path("inbox")
 SENT_DIR = Path("sent")
 KEYS_DIR = Path("client_keys")
 
+# Diretórios locais usados pelo cliente:
+# - inbox: ficheiros recebidos
+# - sent: ficheiros enviados
+# - client_keys: seed local cifrado por utilizador
 INBOX_DIR.mkdir(exist_ok=True)
 SENT_DIR.mkdir(exist_ok=True)
 KEYS_DIR.mkdir(exist_ok=True)
 
 
 def save_local_seed(username: str, password: str, seed_b64: str) -> None:
-    """
-    Persiste o seed em disco, cifrado com uma chave derivada da password.
-    O seed é o segredo de longa duração; só este cliente o conhece em claro.
-    """
+    # Cifra o seed recebido do servidor com uma chave derivada da password e guarda-o localmente
     salt_b64, derived_key_b64 = hash_password(password)
     blob = encrypt_with_aes_gcm(seed_b64.encode("utf-8"), derived_key_b64)
 
@@ -50,6 +51,7 @@ def save_local_seed(username: str, password: str, seed_b64: str) -> None:
 
 
 def load_local_seed(username: str, password: str) -> str:
+    # Lê o seed local cifrado pelo cliente e descifra-o com a password
     seed_file = KEYS_DIR / f"{username}.seed"
 
     if not seed_file.exists():
@@ -69,11 +71,13 @@ def load_local_seed(username: str, password: str) -> str:
 
 
 def send_json(conn: socket.socket, data: dict) -> None:
+    # Envia JSON ao servidor
     message = json.dumps(data).encode("utf-8")
     conn.sendall(len(message).to_bytes(4, "big") + message)
 
 
 def recv_json(conn: socket.socket) -> dict | None:
+    # Recebe JSON do servidor
     size_data = conn.recv(4)
 
     if not size_data:
@@ -91,14 +95,15 @@ def recv_json(conn: socket.socket) -> dict | None:
     return json.loads(message.decode("utf-8"))
 
 
+# registo 
 def register(conn: socket.socket) -> None:
     username = input("Username: ").strip()
     password = getpass("Password: ")
 
-    # 1) PBKDF2 corre LOCALMENTE — a password nunca sai daqui.
+    # 1) PBKDF2 corre localmente — a password nunca sai daqui
     salt_b64, password_hash_b64 = hash_password(password)
 
-    # 2) Par RSA-2048 efémero — a privada fica neste cliente, a pública vai.
+    # 2) Par RSA temporário 
     private_pem, public_pem = generate_rsa_key_pair()
 
     send_json(conn, {
@@ -115,8 +120,7 @@ def register(conn: socket.socket) -> None:
     if response["status"] != "ok":
         return
 
-    # 3) Decifra o seed (RSA-OAEP) e persiste-o localmente
-    #    cifrado com chave derivada da password.
+    # 3) Decifra o seed recebido via RSA-OAEP com a chave privada temporária
     seed_bytes = decrypt_with_rsa_oaep(
         response["encrypted_seed"],
         private_pem
@@ -130,11 +134,12 @@ def register(conn: socket.socket) -> None:
     print()
 
 
+# login 
 def login(conn: socket.socket) -> tuple[str | None, str | None]:
     username = input("Username: ").strip()
     password = getpass("Password: ")
 
-    # Fase 1: anunciar quem somos e receber salt + desafio.
+    # Fase 1: enviar o login e receber salt + nonce
     send_json(conn, {
         "action": "login_init",
         "username": username
@@ -150,8 +155,7 @@ def login(conn: socket.socket) -> tuple[str | None, str | None]:
     nonce_b64 = init_response["nonce"]
 
     # Fase 2: derivar a mesma pwd_hash que o servidor tem (PBKDF2 com o mesmo salt)
-    # e provar conhecimento dela calculando HMAC(nonce, pwd_hash).
-    # A password nunca sai daqui.
+    # e verificar calculando HMAC(nonce, pwd_hash)
     salt_bytes = decode_b64(salt_b64)
     _, pwd_hash_b64 = hash_password(password, salt_bytes)
 
@@ -170,9 +174,7 @@ def login(conn: socket.socket) -> tuple[str | None, str | None]:
     if response["status"] != "ok":
         return None, None
 
-    # Carrega o seed local (cifrado com a password) e deriva a KEK desta
-    # sessão. O servidor faz a mesma derivação independentemente —
-    # nada relativo à KEK viaja na rede.
+    # Carrega o seed local (cifrado com a password) e deriva a KEK desta sessão
     try:
         seed_b64 = load_local_seed(username, password)
     except FileNotFoundError as error:
@@ -186,6 +188,7 @@ def login(conn: socket.socket) -> tuple[str | None, str | None]:
 
 
 def list_online(conn: socket.socket) -> None:
+    # Pede ao servidor a lista de utilizadores atualmente online
     send_json(conn, {
         "action": "list_online"
     })
@@ -208,6 +211,7 @@ def list_online(conn: socket.socket) -> None:
     print()
 
 
+# envio de ficheiros
 def send_plain_file(conn: socket.socket, shared_key: str) -> None:
     recipient = input("Destinatário online: ").strip()
     file_path_str = input("Caminho do ficheiro a enviar: ").strip()
@@ -219,8 +223,8 @@ def send_plain_file(conn: socket.socket, shared_key: str) -> None:
         return
 
     file_bytes = file_path.read_bytes()
-
-    # HMAC calculado sobre o conteúdo do ficheiro.
+    
+    # HMAC calculado sobre o conteúdo do ficheiro
     mac = create_hmac_sha256(file_bytes, shared_key)
 
     send_json(conn, {
@@ -242,6 +246,7 @@ CIPHER_CHOICES = [
 ]
 
 
+# escolha de cifra para envio cifrado
 def choose_cipher() -> str:
     print("\nEscolhe a cifra para este ficheiro:")
     for i, (name, desc) in enumerate(CIPHER_CHOICES, start=1):
@@ -262,6 +267,7 @@ def choose_cipher() -> str:
     return "AES-256-GCM"
 
 
+# envio de ficheiro cifrado com cifra escolhida pelo utilizador
 def send_encrypted_file(conn: socket.socket, shared_key: str) -> None:
     recipient = input("Destinatário online: ").strip()
     file_path_str = input("Caminho do ficheiro a enviar: ").strip()
@@ -274,19 +280,19 @@ def send_encrypted_file(conn: socket.socket, shared_key: str) -> None:
 
     file_bytes = file_path.read_bytes()
 
-    # Escolha de cifra e tamanho de chave (ponto 4 dos fortalecimentos).
+    # Escolha de cifra e tamanho de chave 
     cipher = choose_cipher()
     key_size = SUPPORTED_CIPHERS[cipher]
 
     # Chave de sessão: gerada pelo cliente emissor com o tamanho exigido
-    # pela cifra escolhida (16/24/32 bytes).
+    # pela cifra escolhida (16/24/32 bytes)
     session_key = generate_symmetric_key(size_bytes=key_size)
 
-    # Ficheiro cifrado com a chave de sessão usando a cifra escolhida.
+    # Ficheiro cifrado com a chave de sessão usando a cifra escolhida
     encrypted_file = encrypt_with_cipher(file_bytes, session_key, cipher)
 
     # Chave de sessão protegida para o agente.
-    # O envelope mantém-se AES-256-GCM porque a KEK é sempre 32 bytes.
+    # O envelope mantém-se AES-256-GCM porque a KEK é sempre 32 bytes
     encrypted_session_key_for_agent = encrypt_with_aes_gcm(
         session_key.encode("utf-8"),
         shared_key
@@ -304,6 +310,7 @@ def send_encrypted_file(conn: socket.socket, shared_key: str) -> None:
     response = recv_json(conn)
     print(response["message"])
 
+# assinatura de ficheiro pelo agente (RSA-PSS)
 def send_signed_file(conn: socket.socket) -> None:
     recipient = input("Destinatário online: ").strip()
     file_path_str = input("Caminho do ficheiro a assinar e enviar: ").strip()
@@ -316,8 +323,8 @@ def send_signed_file(conn: socket.socket) -> None:
 
     file_bytes = file_path.read_bytes()
 
-    # Pede ao Mr. Smith para assinar e entregar ao destinatário.
-    # O servidor é que detém a chave privada de assinatura.
+    # Pede ao Mr. Smith para assinar e entregar ao destinatário
+    # O servidor é que tem a chave privada de assinatura
     send_json(conn, {
         "action": "send_signed_file",
         "recipient": recipient,
@@ -330,6 +337,7 @@ def send_signed_file(conn: socket.socket) -> None:
 
 
 def verify_signed_file() -> None:
+    # Verifica a assinatura de um ficheiro .json assinado pelo Mr. Smith
     signed_file_path_str = input("Caminho do ficheiro .json assinado: ").strip()
     signed_file_path = Path(signed_file_path_str)
 
@@ -352,6 +360,7 @@ def verify_signed_file() -> None:
         print("Assinatura inválida: o ficheiro ou a assinatura podem ter sido alterados.")
 
 def list_inbox(conn: socket.socket) -> list[dict]:
+    # lista de ficheiros pendentes na caixa de entrada do utilizador no servidor
     send_json(conn, {
         "action": "list_inbox"
     })
@@ -381,6 +390,7 @@ def list_inbox(conn: socket.socket) -> list[dict]:
 
 
 def download_file(conn: socket.socket, shared_key: str) -> None:
+    # Seleciona um ficheiro da inbox e processa-o conforme o seu tipo
     files = list_inbox(conn)
 
     if not files:
@@ -436,7 +446,7 @@ def download_file(conn: socket.socket, shared_key: str) -> None:
         cipher = file_info.get("cipher", "AES-256-GCM")  # default p/ retro-compat
 
         try:
-            # 1) O destinatário obtém a chave de sessão (envelope sempre AES-256-GCM).
+            # 1) O destinatário obtém a chave de sessão 
             session_key_bytes = decrypt_with_aes_gcm(
                 file_info["encrypted_session_key"],
                 shared_key
@@ -444,7 +454,7 @@ def download_file(conn: socket.socket, shared_key: str) -> None:
 
             session_key = session_key_bytes.decode("utf-8")
 
-            # 2) Decifra o ficheiro com a cifra escolhida pelo emissor.
+            # 2) Decifra o ficheiro com a cifra escolhida pelo emissor
             file_bytes = decrypt_with_cipher(
                 file_info["encrypted_file"],
                 session_key,
@@ -469,7 +479,7 @@ def download_file(conn: socket.socket, shared_key: str) -> None:
         public_key = decode_b64(file_info["public_key"])
 
         # Verificação RSA-PSS com a chave pública do Mr. Smith
-        # (incluída no ficheiro assinado para verificação offline).
+        # (incluída no ficheiro assinado para verificação offline)
         valid = verify_signature(file_bytes, signature, public_key)
 
         safe_filename = f"signed_from_{sender}_{filename}"
@@ -490,221 +500,105 @@ def download_file(conn: socket.socket, shared_key: str) -> None:
 
 HELP_TEXTS = {
     "1": ("Visão geral do sistema", """
-MR.SMITH é uma plataforma de partilha segura de ficheiros entre utilizadores,
-com um servidor que atua como agente de confiança (TTP - Trusted Third Party).
+MR.SMITH é uma plataforma de partilha segura de ficheiros com um
+servidor que atua como agente de confiança (TTP).
 
 ARQUITETURA
-  - Servidor TTP escuta na porta 5000 (em todas as interfaces)
-  - Clientes ligam-se ao servidor para comunicar entre si
-  - Os clientes NÃO falam diretamente uns com os outros
+  - O servidor escuta na porta 5000
+  - Clientes ligam-se ao servidor
+  - Clientes não comunicam diretamente entre si
 
-EXECUÇÃO EM REDE
-  - Por defeito, o cliente liga-se a 127.0.0.1 (mesma máquina do servidor)
-  - Para ligar a um servidor noutra máquina:
-      python3 client.py <IP_DO_SERVIDOR>
-      python3 client_tui.py <IP_DO_SERVIDOR>
-  - O servidor mostra o seu IP de rede ao arrancar.
+MODOS DE ENVIO
+  - Em claro + HMAC
+  - Cifrado (AES-GCM / ChaCha20)
+  - Assinado pelo Mr. Smith
 
-3 MODOS DE ENVIO
-  - Em claro + HMAC      -> integridade (sem confidencialidade)
-  - Cifrado AES-256-GCM  -> confidencialidade + integridade
-  - Assinado pelo agente -> autenticidade certificada (RSA-PSS)
-
-PRESSUPOSTO
-  O servidor é confiável (não consulta nem altera dados maliciosamente).
-  Os atacantes podem escutar/manipular a rede, mas não comprometer o agente.
+EXECUÇÃO
+  python3 client.py <IP>
+  python3 client_tui.py <IP>
 """),
 
     "2": ("Registo e autenticação", """
-REGISTO (uma vez por computador)
-  - Escolhes username único e password.
-  - A password NUNCA viaja pela rede:
-      O cliente computa LOCALMENTE: hash = PBKDF2-SHA256(password, salt, 200k)
-      Só (salt, hash) são enviados ao servidor.
-  - O servidor gera um seed aleatório (256 bits) e envia-o cifrado com RSA-OAEP,
-    usando uma chave pública efémera gerada pelo cliente no momento.
-  - O cliente decifra o seed e guarda-o em client_keys/<user>.seed,
-    ele próprio cifrado com chave derivada da password.
+REGISTO
+  - Escolhes username e password
+  - A password nunca é enviada em claro
+  - O cliente envia apenas PBKDF2(password, salt)
+  - O servidor gera um seed secreto e envia-o cifrado com RSA-OAEP
+  - O seed fica guardado localmente cifrado com AES-GCM
 
-LOGIN (a cada sessão)
-  - Desafio-resposta com HMAC, sem transmitir a password:
-      1. Cliente: "sou alice"
-      2. Servidor: devolve (salt, nonce aleatório)
-      3. Cliente: prova = HMAC(nonce, PBKDF2(password, salt))
-      4. Servidor: verifica e devolve apenas um contador de login
-  - O nonce é diferente a cada login -> anti-replay.
-  - Ambos derivam KEK_sessao = HMAC(seed, login_counter).
-  - O contador incrementa a cada login -> KEK diferente por sessão (rotação).
+LOGIN
+  - Usa desafio-resposta com HMAC
+  - O servidor envia um nonce aleatório
+  - O cliente responde com HMAC(nonce, password_hash)
+  - Cliente e servidor derivam a mesma KEK de sessão
 """),
 
-    "3": ("Enviar ficheiros (3 modos)", """
+    "3": ("Enviar ficheiros", """
 1) EM CLARO + HMAC
-   - Ficheiro vai em base64, sem cifrar.
-   - Acompanhado de HMAC-SHA256(ficheiro, KEK_alice_sessao).
-   - Agente verifica HMAC com KEK da Alice, regera com KEK do Bob, encaminha.
-   - Garante INTEGRIDADE: destinatário sabe que o ficheiro não foi alterado.
-   - NÃO garante confidencialidade: quem escuta a rede vê o conteúdo.
+   - O ficheiro não é cifrado
+   - HMAC garante integridade
 
-2) CIFRADO (CIFRA E TAMANHO À ESCOLHA)
-   - O emissor escolhe a cifra:
-       AES-128-GCM / AES-192-GCM / AES-256-GCM / ChaCha20-Poly1305
-   - Cliente gera chave de sessão única só para este ficheiro, do tamanho
-     exigido pela cifra escolhida (16/24/32 bytes).
-   - Cifra o ficheiro com essa chave (nonce de 96 bits único).
-   - Cifra a chave de sessão com a KEK da Alice (envelope encryption,
-     sempre AES-256-GCM porque a KEK é de 32 bytes).
-   - Agente decifra o envelope com KEK_alice, re-cifra com KEK_bob, encaminha.
-   - O ficheiro cifrado NUNCA é decifrado pelo agente — só a chave que o protege.
-   - Garante CONFIDENCIALIDADE + INTEGRIDADE (todas as cifras são AEAD).
+2) CIFRADO
+   - AES-128/192/256-GCM ou ChaCha20-Poly1305
+   - Cada ficheiro usa uma chave de sessão diferente
+   - A chave de sessão é protegida com a KEK da sessão
 
-3) ASSINADO PELO MR. SMITH
-   - Cliente envia o ficheiro em claro.
-   - Agente assina com a sua chave privada RSA-2048 (PSS + SHA-256).
-   - Entrega ao destinatário: ficheiro + assinatura + chave pública do agente.
-   - Garante AUTENTICIDADE: destinatário verifica que o agente assinou
-     (e portanto que o ficheiro veio de um utilizador autenticado).
+3) ASSINADO
+   - O Mr. Smith assina com RSA-PSS
+   - O destinatário verifica com a chave pública do agente
 """),
 
-    "4": ("Receber ficheiros (inbox)", """
-Opção 3 do menu principal: "Ver/receber ficheiros da inbox".
+    "4": ("Receber ficheiros", """
+INBOX
+  - Lista ficheiros pendentes no servidor
+  - Cada ficheiro pode ser:
+      plain
+      encrypted
+      signed
 
-FLUXO
-  - Mostra a lista de ficheiros pendentes para ti no servidor.
-  - Cada ficheiro tem um tipo: plain / encrypted / signed.
-  - Escolhes o ficheiro pelo número.
-  - O cliente verifica e/ou decifra automaticamente conforme o tipo:
-      plain     -> verifica HMAC com a KEK desta sessão
-      encrypted -> decifra envelope da chave -> decifra ficheiro com AES-GCM
-      signed    -> verifica assinatura RSA-PSS com a chave pública incluída
-  - Ficheiro guardado em inbox/<tipo>_from_<remetente>_<nome>
+VERIFICAÇÕES
+  plain     -> verifica HMAC
+  encrypted -> decifra chave de sessão e ficheiro
+  signed    -> verifica assinatura RSA-PSS
 
-NOTA
-  Se a verificação falhar (HMAC inválido ou assinatura inválida),
-  o ficheiro continua a ser guardado mas és avisada que pode ter sido alterado.
+Os ficheiros recebidos ficam guardados na pasta inbox/.
 """),
 
-    "5": ("Verificar ficheiro assinado (.json local)", """
-Opção 4 do menu principal: verificação OFFLINE de uma assinatura.
-
-PARA QUE SERVE
-  Permite-te verificar que um ficheiro .json assinado pelo Mr.Smith é
-  autêntico, mesmo sem estares ligada ao servidor.
-
-QUANDO É ÚTIL
-  - Recebes um ficheiro assinado por outro canal (email, USB...)
-  - Queres confirmar que uma assinatura armazenada há semanas continua válida
-  - Queres demonstrar a alguém que não confia que o agente assinou
-
-COMO FUNCIONA
-  - Indicas o caminho do ficheiro .json
-  - O cliente lê (ficheiro, assinatura, chave pública)
-  - Verifica a assinatura RSA-PSS
-  - Diz-te "válida" ou "inválida"
-"""),
-
-    "6": ("Conceitos criptográficos usados", """
-PBKDF2-HMAC-SHA256 (200 000 iterações)
-  Deriva uma chave a partir de password + salt. As iterações tornam
-  ataques de dicionário 200000x mais lentos.
-  USADO EM: hash de password no servidor, derivação para cifrar seed local.
+    "5": ("Conceitos criptográficos usados", """
+PBKDF2-HMAC-SHA256
+  - Proteção de passwords
 
 HMAC-SHA256
-  MAC (Message Authentication Code) baseado em hash com chave secreta.
-  Garante integridade + autenticidade — só quem tem a chave produz um MAC válido.
-  USADO EM: envio em claro, desafio-resposta no login, derivação da KEK de sessão.
+  - Integridade e autenticação
 
-AES-256-GCM
-  Cifra simétrica autenticada (Encrypt-then-MAC integrado).
-  Chave 256 bits, nonce 96 bits ÚNICO por cifragem.
-  Garante confidencialidade + integridade numa só operação.
-  USADO EM: cifra de ficheiros, envelope da chave de sessão, cifra do seed local.
+AES-GCM / ChaCha20-Poly1305
+  - Confidencialidade + integridade
 
-RSA-OAEP (Optimal Asymmetric Encryption Padding)
-  Cifra de chave pública RSA-2048 com padding probabilístico (MGF1+SHA-256).
-  Prova de segurança no modelo CCA.
-  USADO EM: troca do seed no momento do registo.
+RSA-OAEP
+  - Troca segura do seed
 
-RSA-PSS (Probabilistic Signature Scheme)
-  Assinatura digital RSA-2048 com padding probabilístico (MGF1+SHA-256).
-  Cada assinatura é diferente mesmo da mesma mensagem.
-  USADO EM: assinatura do agente sobre ficheiros enviados.
-
-SEED
-  Segredo de longa duração estabelecido no registo.
-  Conhecido apenas pelo cliente (localmente) e pelo servidor.
-  Nunca é transmitido em claro.
+RSA-PSS
+  - Assinaturas digitais
 
 KEK DE SESSÃO
-  Derivada de HMAC(seed, login_counter).
-  Muda a cada login (rotação).
-  Usada para HMACs e envelopes durante a sessão atual.
+  - Derivada de HMAC(seed, counter)
+  - Muda a cada login
 """),
 
-    "7": ("Onde estão as minhas chaves e dados", """
-NO SERVIDOR (users.json)
-  - salt (público)
-  - password_hash (PBKDF2 da tua password)
-  - seed (segredo de longa duração)
-  - login_counter (incrementa a cada login)
-  NUNCA: a tua password em claro.
+    "6": ("Limitações e pressupostos", """
+PRESSUPOSTOS
+  - O servidor é considerado confiável
+  - O atacante pode escutar a rede
 
-NO CLIENTE (client_keys/<user>.seed)
-  - salt local (público)
-  - blob: seed cifrado com AES-GCM, chave = PBKDF2(password, salt local)
-  NUNCA: password, seed em claro.
-
-NO SERVIDOR (keys/mrsmith_*.pem)
-  - Par RSA-2048 do agente para assinaturas digitais.
-  - Gerado uma vez ao arranque, persistente entre reinícios.
-
-PASTAS DE FICHEIROS
-  - sent/        -> ficheiros que TU envias (origem)
-  - inbox/       -> ficheiros que recebes (destino)
-  - client_keys/ -> seed local cifrado de cada utilizador deste computador
-  - keys/        -> par de chaves RSA do agente (no servidor)
-"""),
-
-    "8": ("Modelo de segurança e ameaças", """
-O QUE ESTÁ PROTEGIDO
-
-  CONFIDENCIALIDADE DA PASSWORD
-    - Nunca sai do cliente em claro.
-    - Servidor só vê o hash PBKDF2.
-    - Sniffing da rede não revela.
-
-  CONFIDENCIALIDADE DO SEED
-    - Trocado no registo via RSA-OAEP — sniffing inútil.
-    - Em disco no cliente: cifrado com chave derivada da password.
-
-  CONFIDENCIALIDADE DOS FICHEIROS (modo cifrado)
-    - AES-256-GCM com chave de sessão única por ficheiro.
-    - Envelope da chave: AES-GCM com KEK da sessão.
-    - Servidor decifra apenas o envelope, nunca o ficheiro.
-
-  INTEGRIDADE
-    - HMAC nos envios sem cifra; tag GCM nos cifrados; PSS nas assinaturas.
-
-  AUTENTICIDADE
-    - Login: desafio-resposta com HMAC (anti-replay via nonce).
-    - Mensagens: HMAC ou assinatura RSA-PSS.
-
-  FRESCURA
-    - Rotação de KEK a cada login (HMAC(seed, counter)).
-    - Nonce diferente em cada AES-GCM e em cada desafio de login.
-
-
-O QUE NÃO ESTÁ PROTEGIDO
-
-  - Comprometimento do servidor: atacante obtém todas as seeds.
-    Mitigação: assume-se TTP confiável.
-  - Ataques físicos ao cliente (keylogger, RAM dump).
-  - Denial of Service: não há limites de rate.
-  - Análise de tráfego: o atacante vê quem comunica com quem (metadata).
+LIMITAÇÕES
+  - O modo plain não garante confidencialidade
+  - O sistema não protege contra malware/keyloggers
+  - O servidor consegue ver metadata (quem comunica com quem)
 """),
 }
 
-
 def help_menu() -> None:
+    # Mostrar o menu de ajuda detalhada com tópicos explicativos
     while True:
         print("\n=== AJUDA MR.SMITH ===")
         for key in HELP_TEXTS:
@@ -725,10 +619,11 @@ def help_menu() -> None:
 
 
 def send_menu(conn: socket.socket, shared_key: str) -> None:
+    # Menu de escolha do modo de envio de ficheiro
     print("\n=== Enviar ficheiro ===")
     print("Modo:")
     print("  1 - Em claro com HMAC (integridade)")
-    print("  2 - Cifrado com AES-GCM (confidencialidade + integridade)")
+    print("  2 - Cifrado com AES-GCM / ChaCha20 (confidencialidade + integridade)")
     print("  3 - Assinado pelo Mr. Smith (autenticidade)")
     print("  0 - Voltar")
 
@@ -747,6 +642,7 @@ def send_menu(conn: socket.socket, shared_key: str) -> None:
 
 
 def authenticated_menu(conn: socket.socket, username: str, shared_key: str) -> None:
+    # Menu exibido após login bem-sucedido, para operações autenticadas
     while True:
         print("\n=== MR.SMITH | Cliente autenticado ===")
         print(f"Utilizador: {username}")
@@ -784,6 +680,8 @@ def authenticated_menu(conn: socket.socket, username: str, shared_key: str) -> N
             print("Opção inválida.")
 
 def main() -> None:
+    # Conecta ao servidor e apresenta o menu principal de registo/login
+    # A ligação TCP permanece aberta durante toda a execução
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as conn:
         conn.connect((HOST, PORT))
 
