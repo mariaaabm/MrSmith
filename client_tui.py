@@ -34,27 +34,32 @@ from crypto_utils import (
 from client import HELP_TEXTS
 
 
-# IP do servidor: pode ser passado como argumento (ex.: python3 client_tui.py 192.168.1.50).
-# Default: localhost.
+# IP do servidor que pode ser passado como argumento (ex.: python3 client_tui.py 192.168.1.50)
+# por defeito é localhost
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
 PORT = 5000
 
 INBOX_DIR = Path("inbox")
+SENT_DIR = Path("sent")
 KEYS_DIR = Path("client_keys")
+
+# Diretórios locais usados pelo cliente:
+# - inbox: ficheiros recebidos do servidor
+# - sent: ficheiros enviados pelo cliente
+# - client_keys: seed local cifrado por utilizador
 INBOX_DIR.mkdir(exist_ok=True)
+SENT_DIR.mkdir(exist_ok=True)
 KEYS_DIR.mkdir(exist_ok=True)
 
 
-# =========================================================================
-# Protocolo (funções puras — sem I/O na stdin/stdout)
-# =========================================================================
-
 def send_json(conn, data):
+    # Envia uma mensagem JSON ao servidor 
     message = json.dumps(data).encode("utf-8")
     conn.sendall(len(message).to_bytes(4, "big") + message)
 
 
 def recv_json(conn):
+    # Recebe uma mensagem JSON do servidor 
     size_data = conn.recv(4)
     if not size_data:
         return None
@@ -69,6 +74,7 @@ def recv_json(conn):
 
 
 def save_local_seed(username, password, seed_b64):
+    # Guarda o seed local cifrado com chave derivada da password do utilizador
     salt_b64, derived_key_b64 = hash_password(password)
     blob = encrypt_with_aes_gcm(seed_b64.encode("utf-8"), derived_key_b64)
     seed_file = KEYS_DIR / f"{username}.seed"
@@ -77,6 +83,7 @@ def save_local_seed(username, password, seed_b64):
 
 
 def load_local_seed(username, password):
+    # Lê o seed local cifrado e decifra-o usando a mesma password
     seed_file = KEYS_DIR / f"{username}.seed"
     if not seed_file.exists():
         raise FileNotFoundError(
@@ -91,6 +98,8 @@ def load_local_seed(username, password):
 
 
 def protocol_register(conn, username, password):
+    # Registo do utilizador no servidor
+    # A password é processada localmente com PBKDF2 e a chave pública RSA temporária é enviada
     salt_b64, password_hash_b64 = hash_password(password)
     private_pem, public_pem = generate_rsa_key_pair()
     send_json(conn, {
@@ -107,8 +116,8 @@ def protocol_register(conn, username, password):
     return response
 
 
+# login do utilizador 
 def protocol_login(conn, username, password):
-    """Devolve (kek_b64, counter). Levanta Exception se falhar."""
     send_json(conn, {"action": "login_init", "username": username})
     init_resp = recv_json(conn)
     if init_resp["status"] != "ok":
@@ -135,6 +144,7 @@ def protocol_login(conn, username, password):
 
 
 def protocol_list_online(conn, exclude=None):
+    # Pede a lista de utilizadores online ao servidor.
     send_json(conn, {"action": "list_online"})
     resp = recv_json(conn)
     if resp["status"] != "ok":
@@ -144,7 +154,7 @@ def protocol_list_online(conn, exclude=None):
         users = [u for u in users if u != exclude]
     return users
 
-
+# envio de ficheiro em claro com HMAC 
 def protocol_send_plain(conn, kek, recipient, file_path):
     file_bytes = Path(file_path).read_bytes()
     mac = create_hmac_sha256(file_bytes, kek)
@@ -157,7 +167,7 @@ def protocol_send_plain(conn, kek, recipient, file_path):
     })
     return recv_json(conn)
 
-
+# envio de ficheiro cifrado com AES-GCM ou ChaCha20 e chave de sessão cifrada com KEK
 def protocol_send_encrypted(conn, kek, recipient, file_path, cipher):
     file_bytes = Path(file_path).read_bytes()
     key_size = SUPPORTED_CIPHERS[cipher]
@@ -174,7 +184,7 @@ def protocol_send_encrypted(conn, kek, recipient, file_path, cipher):
     })
     return recv_json(conn)
 
-
+# Pede ao servidor para assinar o ficheiro com a chave privada do Mr. Smith
 def protocol_send_signed(conn, recipient, file_path):
     file_bytes = Path(file_path).read_bytes()
     send_json(conn, {
@@ -191,9 +201,8 @@ def protocol_list_inbox(conn):
     resp = recv_json(conn)
     return resp.get("files", [])
 
-
+# download de ficheiro da inbox, com decifragem e verificação conforme o tipo
 def protocol_download_file(conn, kek, index):
-    """Devolve tuple (status_string, output_path | None)."""
     send_json(conn, {"action": "download_file", "index": index})
     resp = recv_json(conn)
     if resp["status"] != "ok":
@@ -244,10 +253,7 @@ def protocol_logout(conn):
         pass
 
 
-# =========================================================================
-# Screens
-# =========================================================================
-
+# Tela de login inicial onde o utilizador se pode registar ou autenticar
 class LoginScreen(Screen):
     BINDINGS = [("escape", "app.quit", "Sair")]
 
@@ -320,6 +326,7 @@ class LoginScreen(Screen):
             self.do_login(username, password)
 
 
+# Tela principal após o login. Permite enviar ficheiros e ver utilizadores online.
 class DashboardScreen(Screen):
     BINDINGS = [
         ("ctrl+i", "inbox", "Inbox"),
@@ -456,6 +463,7 @@ class DashboardScreen(Screen):
         self.app.pop_screen()
 
 
+# Tela da inbox que mostra ficheiros pendentes e permite descarregar
 class InboxScreen(Screen):
     BINDINGS = [
         ("escape", "back", "Voltar"),
@@ -534,7 +542,7 @@ class InboxScreen(Screen):
     def action_back(self) -> None:
         self.app.pop_screen()
 
-
+# tela de ajuda com tópicos explicativos sobre o funcionamento do sistema
 class HelpScreen(Screen):
     BINDINGS = [("escape", "back", "Voltar")]
 
@@ -564,10 +572,8 @@ class HelpScreen(Screen):
         self.app.pop_screen()
 
 
-# =========================================================================
-# App
-# =========================================================================
 
+# Aplicação TUI principal. Inicia a ligação ao servidor e controla o fluxo de ecrãs.
 class MrSmithApp(App):
     CSS_PATH = "client_tui.tcss"
     TITLE = "MR.SMITH"
